@@ -36,5 +36,9 @@ So the general problem to solve is that of turning multiple parallel writes into
 Other Stuff
 ===========
 
- * This project assumes .NET 4.0 because async streams look so fiiiiine (opinion subject to review once I've had to use them in anger).
+ * This project assumes .NET 4.5 because async streams look so fiiiiine (opinion subject to review once I've had to use them in anger).
  * This project will not use Reactive Extensions, because Rx is the best code-obfuscation-tool-disguised-as-useful-library I have encountered so far.
+
+Some filesystems (notably ZFS) already offer improvements in handling of writes to spinning rust and with sufficient RAM can handle random reads swiftly too. Windows sadly lags some way behind Unixes in terms of filesystem development, but both can benefit from applications catering to the capabilities of the hardware rather than assuming that everyone has a solid-state disk. SSDs handle sequential writes well too, so there's no downside to optimising your disk access patterns for rust other than the maintenance overhead, and hopefully this library will be able to ease that in certain cases.
+
+When I get around to it I plan on specifically implementing a wrapper to provide ReadyBoost-style caching capabilities. In the meantime, possibly someone could solve the eternally-hard problem of cache invalidation for me? >_>
