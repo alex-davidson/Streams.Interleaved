@@ -19,7 +19,7 @@ Possible Applications
 =====================
 
  * Reshaping of row-wise data to column-wise, where the consumer is expecting to process all columns of a record at about the same time (original purpose, see below).
- * ReadyBoost-style caching for an application which must access many files during startup, but in a consistent pattern (may require some assembly).
+ * ReadyBoot-style caching for an application which must access many files during startup, but in a consistent pattern (may require some assembly).
  * Fast buffering (on rust) of many intermediate resultsets in a batch-processing system.
  * Basically any place where you need to buffer multiple parallel streams to a storage device which hates seeks AND your read pattern is similar to your write pattern.
  
@@ -41,4 +41,4 @@ Other Stuff
 
 Some filesystems (notably ZFS) already offer improvements in handling of writes to spinning rust and with sufficient RAM can handle random reads swiftly too. Windows sadly lags some way behind Unixes in terms of filesystem development, but both can benefit from applications catering to the capabilities of the hardware rather than assuming that everyone has a solid-state disk. SSDs handle sequential writes well too, so there's no downside to optimising your disk access patterns for rust other than the maintenance overhead, and hopefully this library will be able to ease that in certain cases.
 
-When I get around to it I plan on specifically implementing a wrapper to provide ReadyBoost-style caching capabilities. In the meantime, possibly someone could solve the eternally-hard problem of cache invalidation for me? >_>
+When I get around to it I plan on specifically implementing a wrapper to provide ReadyBoot-style caching capabilities. In the meantime, possibly someone could solve the eternally-hard problem of cache invalidation for me? >_>
