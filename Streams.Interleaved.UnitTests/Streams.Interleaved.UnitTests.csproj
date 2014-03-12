@@ -33,6 +33,10 @@
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="log4net, Version=1.2.13.0, Culture=neutral, PublicKeyToken=669e0ddf0bb1aa2a, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\packages\log4net.2.0.3\lib\net40-full\log4net.dll</HintPath>
+    </Reference>
     <Reference Include="nunit.framework">
       <HintPath>..\packages\NUnit.2.6.3\lib\nunit.framework.dll</HintPath>
     </Reference>
@@ -45,8 +49,13 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="TestEnvironment\CheckForRaceConditions.cs" />
+    <Compile Include="Helpers\WritingExtensions.cs" />
+    <Compile Include="Internals\WritableBlockChainTests.cs" />
+    <Compile Include="TestEnvironment\LogToNUnit.cs" />
+    <Compile Include="MultiplexedWritableStreamTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="WritableBlockTests.cs" />
+    <Compile Include="Internals\WritableBlockTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

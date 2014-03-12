@@ -45,15 +45,27 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Lock.cs" />
+    <Compile Include="CommitBlocksToStream.cs" />
+    <Compile Include="IBlockCommit.cs" />
+    <Compile Include="Util\RaceCondition.cs" />
+    <Compile Include="Schema\FeatureFlag.cs" />
+    <Compile Include="IMultiplexedStreamManifest.cs" />
+    <Compile Include="Util\Lock.cs" />
+    <Compile Include="MultiplexedStreamManifest.cs" />
+    <Compile Include="Schema\ManifestEntry.cs" />
+    <Compile Include="Schema\MultiplexedStreamManifestSchema.cs" />
+    <Compile Include="Schema\MultiplexedStreamManifestSerialiser.cs" />
     <Compile Include="MultiplexedWritableStream.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="StreamManifest.cs" />
-    <Compile Include="WritableBlock.cs" />
+    <Compile Include="Schema\BlockHeader.cs" />
+    <Compile Include="Internals\WritableBlock.cs" />
+    <Compile Include="Internals\WritableBlockChain.cs" />
+    <Compile Include="Internals\WritableComponentStream.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

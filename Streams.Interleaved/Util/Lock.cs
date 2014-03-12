@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Threading;
 
-namespace Streams.Interleaved
+namespace Streams.Interleaved.Util
 {
     /// <summary>
     /// Wrapper for Monitor which provides 'using' semantics.
