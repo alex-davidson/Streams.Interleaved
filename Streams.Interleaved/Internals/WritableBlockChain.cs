@@ -18,6 +18,7 @@ namespace Streams.Interleaved.Internals
         {
             this.committer = committer;
             backgroundWriter = BackgroundWriter();
+            backgroundWriter.ContinueWith(t => t.Exception);
         }
 
         public int ActiveBlocks { get { return activeBlocks.Count; } }
@@ -114,7 +115,16 @@ namespace Streams.Interleaved.Internals
                 if (committableBlocks.TryDequeue(out committable))
                 {
                     Advance("Flush block {0}", ref tailPointer);
-                    await committer.Flush(committable, abortTokenSource.Token);
+                    try
+                    {
+                        await committer.Flush(committable, abortTokenSource.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Error(ex);
+                        Abort();
+                        throw;
+                    }
                     Interlocked.Add(ref commitPayload, -committable.Size);
                 }
                 await Task.Yield();
@@ -175,29 +185,40 @@ namespace Streams.Interleaved.Internals
         public Task CloseAsync()
         {
             AssertNotAborted();
-            if (closing)
+            if (PreventFurtherAllocations())
             {
-                // Another thread got here first. Wait until everything's marked for commit.
-                var spinwait = new SpinWait();
-                while (activeBlocks.Count > 0)
+                // Prevent further allocations, then mark all active blocks for commit.
+                foreach (var block in activeBlocks.ToArray())
                 {
-                    spinwait.SpinOnce();
+                    block.RequestCommit();
                     AssertNotAborted();
                 }
             }
             else
             {
-                // Prevent further allocations, then mark all active blocks for commit.
-                using (allocateLock.Acquire())
+                // Another thread got here first. Wait until everything's marked for commit.
+                while (activeBlocks.Count > 0)
                 {
-                    closing = true;
-                }
-                foreach (var block in activeBlocks.ToArray())
-                {
-                    block.RequestCommit();
+                    Thread.Yield();
+                    AssertNotAborted();
                 }
             }
             return backgroundWriter;
+        }
+
+        /// <summary>
+        /// Attempts to mark the stream as 'closing'. Returns true on the thread which did it.
+        /// </summary>
+        /// <returns></returns>
+        private bool PreventFurtherAllocations()
+        {
+            using (allocateLock.Acquire())
+            {
+                if(closing) return false;
+
+                closing = true;
+                return true;
+            }
         }
 
         public void Dispose()

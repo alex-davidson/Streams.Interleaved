@@ -52,12 +52,14 @@
     <Compile Include="TestEnvironment\CheckForRaceConditions.cs" />
     <Compile Include="Helpers\WritingExtensions.cs" />
     <Compile Include="Internals\WritableBlockChainTests.cs" />
+    <Compile Include="TestEnvironment\UnobservedTaskExceptionsAreFatal.cs" />
     <Compile Include="TestEnvironment\LogToNUnit.cs" />
     <Compile Include="MultiplexedWritableStreamTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Internals\WritableBlockTests.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="App.config" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
