@@ -11,21 +11,21 @@ namespace Streams.Interleaved.Internals
 {
     public class WritableBlockChain : IDisposable
     {
-        private readonly IBlockCommitTarget committer;
         private static readonly ILog log = LogManager.GetLogger(typeof(WritableBlockChain));
 
         public WritableBlockChain(IBlockCommitTarget committer)
         {
-            this.committer = committer;
-            backgroundWriter = BackgroundWriter();
-            backgroundWriter.ContinueWith(t => t.Exception);
+            var livenessIndicatorSource = new LivenessIndicatorSource();
+            lifetime = livenessIndicatorSource.TakeStrongReference();
+
+            commitQueue = new CommitQueue(committer, livenessIndicatorSource.TakeWeakReference());
         }
 
         public int ActiveBlocks { get { return activeBlocks.Count; } }
-        public int BlocksPendingCommit { get { return committableBlocks.Count; } }
-        public long TotalBlocks { get { return activeBlocks.Count + committableBlocks.Count; } }
-        public long CommitPayload { get { return commitPayload; } }
-        private long commitPayload = 0;
+        public int BlocksPendingCommit { get { return commitQueue.Count; } }
+        public long TotalBlocks { get { return activeBlocks.Count + commitQueue.Count; } }
+        public long CommitPayload { get { return commitQueue.Payload; } }
+        
         public long EstimateActivePayload()
         {
             return activeBlocks.ToArray().Sum(b => b.Size);
@@ -39,17 +39,13 @@ namespace Streams.Interleaved.Internals
         /// Boundary of the available and committable block chains. Updated only within commitLock.
         /// </summary>
         private long commitPointer;
-        /// <summary>
-        /// Tail of the committable block chain. Updated only by the BackgroundWriter.
-        /// </summary>
-        private long tailPointer;
 
         /// <summary>
         /// Confers permission to enqueue to activeBlocks and update the blockCount pointer.
         /// </summary>
         private readonly Lock allocateLock = new Lock();
         /// <summary>
-        /// Confers permission to dequeue from activeBlocks, enqueue to committableBlocks, and update the commitPointer.
+        /// Confers permission to dequeue from activeBlocks, enqueue to the commitQueue, and update the commitPointer.
         /// </summary>
         private readonly Lock commitLock = new Lock();
 
@@ -69,7 +65,7 @@ namespace Streams.Interleaved.Internals
         /// <summary>
         /// Committable block chain. Blocks are enqueued when committed and dequeued when flushed.
         /// </summary>
-        private readonly ConcurrentQueue<WritableBlock> committableBlocks = new ConcurrentQueue<WritableBlock>();
+        private readonly CommitQueue commitQueue;
 
         /// <summary>
         /// Indicates that the head of the activeBlocks queue was committed.
@@ -79,60 +75,15 @@ namespace Streams.Interleaved.Internals
         /// may already have been moved to the commit queue.
         /// </remarks>
         private readonly AutoResetEvent commitReady = new AutoResetEvent(false);
-        /// <summary>
-        /// When cancelled, aborts the entire block chain and forces an abrupt shutdown of the writer task.
-        /// </summary>
-        /// <remarks>
-        /// May be invoked from user code, but the original intent is to force a rapid shutdown in the event of a bugcheck.
-        /// </remarks>
-        private readonly CancellationTokenSource abortTokenSource = new CancellationTokenSource();
-
-        private readonly Task backgroundWriter;
-
-        public void AssertNotAborted()
-        {
-            if (abortTokenSource.IsCancellationRequested) throw new ObjectDisposedException(GetType().FullName, "The multiplexed stream was aborted.");
-        }
+        
+        private LivenessIndicatorSource.StrongReference lifetime;
 
         public void AssertNotDisposed()
         {
-            AssertNotAborted();
+            lifetime.Indicator.AssertNotAborted();
             if (closing) throw new ObjectDisposedException(GetType().FullName);
         }
-
-        private bool ThereExistUnflushedBlocks()
-        {
-            if(!closing) return true;                   // Stream is still open. Blocks can still be allocated.
-            if(blockCount > tailPointer) return true;   // No more blocks can be allocated, but not all of the existing ones have been flushed.
-            return false;
-        }
-
-        private async Task BackgroundWriter()
-        {
-            while (ThereExistUnflushedBlocks()) // Graceful loop termination condition. Continue until everything allocated is flushed.
-            {
-                WritableBlock committable;
-                if (committableBlocks.TryDequeue(out committable))
-                {
-                    Advance("Flush block {0}", ref tailPointer);
-                    try
-                    {
-                        await committer.Flush(committable, abortTokenSource.Token);
-                    }
-                    catch (Exception ex)
-                    {
-                        log.Error(ex);
-                        Abort();
-                        throw;
-                    }
-                    Interlocked.Add(ref commitPayload, -committable.Size);
-                }
-                await Task.Yield();
-
-                abortTokenSource.Token.ThrowIfCancellationRequested(); // Abnormal loop termination condition. Entire stream is aborted.
-            }
-        }
-
+        
         public WritableBlock AllocateBlock(uint streamId)
         {
             AssertNotDisposed();
@@ -162,16 +113,14 @@ namespace Streams.Interleaved.Internals
 
         public void Abort()
         {
-            abortTokenSource.Cancel();
-            using (allocateLock.Acquire())
-            {
-                closing = true;
-            }
+            lifetime.Indicator.Abort();
         }
 
         public void Close()
         {
             CloseAsync().Wait();
+            lifetime.Release();
+            GC.SuppressFinalize(this);
         }
 
         /// <summary>
@@ -184,14 +133,14 @@ namespace Streams.Interleaved.Internals
         /// <returns></returns>
         public Task CloseAsync()
         {
-            AssertNotAborted();
+            lifetime.Indicator.AssertNotAborted();
             if (PreventFurtherAllocations())
             {
                 // Prevent further allocations, then mark all active blocks for commit.
                 foreach (var block in activeBlocks.ToArray())
                 {
                     block.RequestCommit();
-                    AssertNotAborted();
+                    lifetime.Indicator.AssertNotAborted();
                 }
             }
             else
@@ -200,10 +149,10 @@ namespace Streams.Interleaved.Internals
                 while (activeBlocks.Count > 0)
                 {
                     Thread.Yield();
-                    AssertNotAborted();
+                    lifetime.Indicator.AssertNotAborted();
                 }
             }
-            return backgroundWriter;
+            return commitQueue.FlushTask;
         }
 
         /// <summary>
@@ -216,6 +165,7 @@ namespace Streams.Interleaved.Internals
             {
                 if(closing) return false;
 
+                commitQueue.Complete(blockCount);
                 closing = true;
                 return true;
             }
@@ -224,6 +174,11 @@ namespace Streams.Interleaved.Internals
         public void Dispose()
         {
             Close();
+        }
+
+        ~WritableBlockChain()
+        {
+            lifetime.Release();
         }
 
         private bool TryDequeueCommittableHead(out WritableBlock block)
@@ -285,9 +240,8 @@ namespace Streams.Interleaved.Internals
                     WritableBlock block;
                     while (TryDequeueCommittableHead(out block))
                     {
-                        Interlocked.Add(ref commitPayload, block.Size);
                         Advance("Commit block {0}", ref commitPointer);
-                        committableBlocks.Enqueue(block);
+                        commitQueue.Commit(block);
                     }
                 }
                 while (commitReady.WaitOne(TimeSpan.Zero));
@@ -304,5 +258,95 @@ namespace Streams.Interleaved.Internals
                 TryCommitBlocks();
             }
         }
+
+        public class CommitQueue
+        {
+            private readonly IBlockCommitTarget committer;
+            private readonly LivenessIndicator livenessIndicator;
+            private readonly Task backgroundWriter;
+
+            public CommitQueue(IBlockCommitTarget committer, LivenessIndicator livenessIndicator)
+            {
+                this.committer = committer;
+                this.livenessIndicator = livenessIndicator;
+                backgroundWriter = BackgroundWriter();
+                backgroundWriter.ContinueWith(t => t.Exception);
+            }
+
+            public Task FlushTask { get { return backgroundWriter; } }
+
+            /// <summary>
+            /// Committable block chain. Blocks are enqueued when committed and dequeued when flushed.
+            /// </summary>
+            private readonly ConcurrentQueue<WritableBlock> committableBlocks = new ConcurrentQueue<WritableBlock>();
+
+            private volatile bool allBlocksAreCommittable;
+
+            public long Payload { get { return commitPayload; } }
+            private long commitPayload = 0;
+
+            /// <summary>
+            /// Tail of the committable block chain. Updated only by the BackgroundWriter.
+            /// </summary>
+            private long tailPointer;
+
+            /// <summary>
+            /// Total number of blocks in the stream. This is set when the queue is completed
+            /// and sets a target value for tailPointer.
+            /// </summary>
+            private long blockCount;
+
+            public int Count { get { return committableBlocks.Count; } }
+
+            private bool ThereExistUnflushedBlocks()
+            {
+                if (!allBlocksAreCommittable) return true;  // Stream is still open. Blocks can still be allocated.
+                if (tailPointer < blockCount) return true;  // No more blocks can be allocated, but not all of the existing ones have been flushed.
+                return false;
+            }
+
+            public void Commit(WritableBlock block)
+            {
+                Interlocked.Add(ref commitPayload, block.Size);
+                committableBlocks.Enqueue(block);
+            }
+
+            private async Task BackgroundWriter()
+            {
+                while (ThereExistUnflushedBlocks()) // Graceful loop termination condition. Continue until everything allocated is flushed.
+                {
+                    if (!livenessIndicator.ParentIsLive) return;
+                    WritableBlock committable;
+                    while (committableBlocks.TryDequeue(out committable))
+                    {
+                        Advance("Flush block {0}", ref tailPointer);
+                        try
+                        {
+                            await committer.Flush(committable, livenessIndicator.AbortToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            log.Error(ex);
+                            livenessIndicator.Abort();
+                            throw;
+                        }
+                        Interlocked.Add(ref commitPayload, -committable.Size);
+                    }
+                    if (!livenessIndicator.ParentIsLive) return;
+
+                    await Task.Yield();
+
+                    livenessIndicator.AbortToken.ThrowIfCancellationRequested(); // Abnormal loop termination condition. Entire stream is aborted.
+                }
+            }
+
+            public void Complete(long blockCount)
+            {
+                this.blockCount = blockCount;
+                Interlocked.MemoryBarrier();
+                allBlocksAreCommittable = true;
+            }
+        }
+
     }
 }

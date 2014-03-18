@@ -17,23 +17,25 @@ namespace Streams.Interleaved.UnitTests.Internals
         [Test]
         public void CanAllocateWritableBlock()
         {
-            var chain = new WritableBlockChain(CommitRecorder.None);
-
-            var block = chain.AllocateBlock(0);
-            block.WriteByteCount(5);
+            using (var chain = new WritableBlockChain(CommitRecorder.None))
+            {
+                var block = chain.AllocateBlock(0);
+                block.WriteByteCount(5);
+            }
         }
 
         [Test]
         public void CanAllocateMultipleActiveBlocks()
         {
-            var chain = new WritableBlockChain(CommitRecorder.None);
-
-            var a = chain.AllocateBlock(1);
-            var b = chain.AllocateBlock(0);
-            a.WriteByteCount(42);
-            var c = chain.AllocateBlock(2);
-            c.WriteByteCount(280);
-            b.WriteByteCount(874);
+            using (var chain = new WritableBlockChain(CommitRecorder.None))
+            {
+                var a = chain.AllocateBlock(1);
+                var b = chain.AllocateBlock(0);
+                a.WriteByteCount(42);
+                var c = chain.AllocateBlock(2);
+                c.WriteByteCount(280);
+                b.WriteByteCount(874);
+            }
         }
 
         [Test]
@@ -59,47 +61,53 @@ namespace Streams.Interleaved.UnitTests.Internals
         }
 
         [Test]
-        public void ClosingTheChainSynchronouslyCommitsAllocatedBlocks()
+        public void ClosingTheChainWillSynchronouslyCommitAllocatedBlocks()
         {
             var recorder = new CommitRecorder();
-            var chain = new WritableBlockChain(recorder);
+            using (var chain = new WritableBlockChain(recorder))
+            {
+                var a = chain.AllocateBlock(1);
+                var b = chain.AllocateBlock(0);
+                a.WriteByteCount(42);
+                b.WriteByteCount(874);
 
-            var a = chain.AllocateBlock(1);
-            var b = chain.AllocateBlock(0);
-            a.WriteByteCount(42);
-            b.WriteByteCount(874);
+                chain.CloseAsync();
 
-            chain.CloseAsync();
-
-            Assert.True(a.Committable.IsCompleted);
-            Assert.True(b.Committable.IsCompleted);
+                Assert.True(a.Committable.IsCompleted);
+                Assert.True(b.Committable.IsCompleted);
+            }
         }
 
         [Test, Repeat(100)]
         public void ClosingTheChainOnMultipleThreads_WaitsForCommitsToCompleteOnEveryThread()
         {
             var recorder = new CommitRecorder();
-            var chain = new WritableBlockChain(recorder);
+            using (var chain = new WritableBlockChain(recorder))
+            {
+                var a = chain.AllocateBlock(1);
+                var b = chain.AllocateBlock(0);
+                a.WriteByteCount(42);
+                b.WriteByteCount(874);
 
-            var a = chain.AllocateBlock(1);
-            var b = chain.AllocateBlock(0);
-            a.WriteByteCount(42);
-            b.WriteByteCount(874);
+                // This process's running time appears to be nonlinearly related to number of threads.
+                // Shouldn't have many threads trying to close at once though, so optimise for small numbers.
+                const int threadCount = 5;
+                var barrier = new Barrier(threadCount);
+                var threads =
+                    Enumerable.Range(0, threadCount)
+                        .Select(i => Task.Factory.StartNew(() =>
+                        {
+                            barrier.SignalAndWait();
 
-            // This process's running time appears to be nonlinearly related to number of threads.
-            // Shouldn't have many threads trying to close at once though, so optimise for small numbers.
-            const int threadCount = 3;
-            var barrier = new Barrier(threadCount);
-            Task.WaitAll(
-                Enumerable.Range(0, threadCount)
-                    .Select(i => Task.Factory.StartNew(() => {
-                        barrier.SignalAndWait();
+                            chain.CloseAsync();
+                            return a.Committable.IsCompleted && b.Committable.IsCompleted;
+                        }))
+                        .ToArray();
 
-                        chain.CloseAsync();
-                        Assert.True(a.Committable.IsCompleted);
-                        Assert.True(b.Committable.IsCompleted);
-                    }))
-                    .ToArray());
+                Task.WaitAll(threads);
+
+                CollectionAssert.DoesNotContain(threads.Select(t => t.Result), false);
+            }
         }
 
         [Test]

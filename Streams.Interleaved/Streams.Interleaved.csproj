@@ -47,6 +47,8 @@
   <ItemGroup>
     <Compile Include="CommitBlocksToStream.cs" />
     <Compile Include="IBlockCommit.cs" />
+    <Compile Include="Internals\LivenessIndicator.cs" />
+    <Compile Include="Internals\LivenessIndicatorSource.cs" />
     <Compile Include="Util\RaceCondition.cs" />
     <Compile Include="Schema\FeatureFlag.cs" />
     <Compile Include="IMultiplexedStreamManifest.cs" />
