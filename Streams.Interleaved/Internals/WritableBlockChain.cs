@@ -232,21 +232,22 @@ namespace Streams.Interleaved.Internals
 
         private void TryCommitBlocks()
         {
-            using (commitLock.TryAcquire())
+            commitReady.Set(); // Head block has possibly become committable.
+            do
             {
-                if (!commitLock.Acquired) return;
-                do
+                using (commitLock.TryAcquire())
                 {
+                    if (!commitLock.Acquired) return;
                     WritableBlock block;
                     while (TryDequeueCommittableHead(out block))
                     {
                         Advance("Commit block {0}", ref commitPointer);
                         commitQueue.Commit(block);
                     }
+                    RaceCondition.Test(10);
                 }
-                while (commitReady.WaitOne(TimeSpan.Zero));
-                RaceCondition.Test(10);
             }
+            while (commitReady.WaitOne(TimeSpan.Zero));
         }
 
         private void NotifyBlockIsCommittable(long blockIndex, WritableBlock block)
@@ -254,7 +255,6 @@ namespace Streams.Interleaved.Internals
             log.DebugFormat("Committable block: {0}", blockIndex);
             if (IsHeadActiveBlock(block))
             {
-                commitReady.Set(); // Head block has possibly become committable.
                 TryCommitBlocks();
             }
         }
