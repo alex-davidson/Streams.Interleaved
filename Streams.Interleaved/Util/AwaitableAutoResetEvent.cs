@@ -22,77 +22,126 @@ namespace Streams.Interleaved.Util
         }
 
         private readonly object @lock = new object();
-        private TaskCompletionSource<bool> current = new TaskCompletionSource<bool>();
-        private volatile bool isSet;
-
+        private EventInstance current = new EventInstance();
+        
         /// <summary>
-        /// Triggers any live waits on this event.
+        /// Sets the event, causing the first available wait to continue.
         /// </summary>
         /// <returns></returns>
         public void Set()
         {
-            if (isSet) return;
-
-            var currentEvent = AcquireCurrentEventForSet();
-            RaceCondition.Test(20);
-            Task.Run(() => currentEvent.TrySetResult(true));
+            SetCurrentEventInstance(); // Do not wait for completion callbacks.
         }
 
         /// <summary>
-        /// Triggers any live waits on this event. Returns when callbacks have completed.
+        /// Sets the event, causing the first available wait to continue.
+        /// If a waiter is already present, returns when it has finished executing.
         /// </summary>
+        /// <remarks>
+        /// Intended for testing. This should not be used unless you're absolutely
+        /// sure you want to run the waiter synchronously.
+        /// </remarks>
         /// <returns></returns>
         public void SetAndWait()
         {
-            if (isSet) return;
-
-            var currentEvent = AcquireCurrentEventForSet();
-            RaceCondition.Test(20);
-            currentEvent.TrySetResult(true);
+            SetCurrentEventInstance().Wait(); // Wait for completion callbacks.
         }
 
-        private TaskCompletionSource<bool> AcquireCurrentEventForSet()
-        {
-            lock (@lock)
-            {
-                isSet = true;
-                return current;
-            }
-        }
-
+        /// <summary>
+        /// Reset the event, if set.
+        /// </summary>
         public void Reset()
         {
-            if (!isSet) return;
+            ResetInternal(current);
+        }
+
+        /// <summary>
+        /// Replace the current event instance with a new, unset one if it has been set AND
+        /// if the specified instance is the current one.
+        /// </summary>
+        /// <param name="instance"></param>
+        private void ResetInternal(EventInstance instance)
+        {
+            if (!instance.IsSet) return;
             lock (@lock)
             {
-                ResetInternal();
+                if (instance == current)
+                {
+                    if (!current.IsSet) return;
+                    current = new EventInstance();
+                }
             }
         }
 
-        private bool ResetInternal()
-        {
-            Debug.Assert(Monitor.IsEntered(@lock));
-            if (!isSet) return false;
-            isSet = false;
-            current = new TaskCompletionSource<bool>();
-            return true;
-        }
-
-        private bool TryTakeEvent()
-        {
-            if (!isSet) return false;
-            lock (@lock)
-            {
-                return ResetInternal();
-            }
-        }
-
-        private Task GetCompletionTask()
+        /// <summary>
+        /// Sets the event and returns the associated completion object as an atomic operation.
+        /// </summary>
+        /// <returns></returns>
+        private Task SetCurrentEventInstance()
         {
             lock (@lock)
             {
-                return current.Task;
+                return current.Set();
             }
+        }
+
+        /// <summary>
+        /// Get the current event instance's completion task as an atomic operation.
+        /// </summary>
+        /// <returns></returns>
+        private Task<EventInstance> GetCompletionTask()
+        {
+            lock (@lock)
+            {
+                return current.Event;
+            }
+        }
+
+        /// <summary>
+        /// Allow a single caller to take the specified instance's event notification.
+        /// For all others this will return false. Also resets the event if the specified
+        /// notification is still the current one.
+        /// </summary>
+        /// <param name="instance"></param>
+        /// <returns></returns>
+        private bool TryTakeEvent(EventInstance instance)
+        {
+            Debug.Assert(instance.IsSet);
+            var result = instance.TryTakeEvent();
+            if (result) ResetInternal(instance);
+            return result;
+        }
+
+        class EventInstance
+        {
+            /// <summary>
+            /// Sets the event synchronously and returns the associated completion callback task.
+            /// </summary>
+            /// <returns></returns>
+            public Task Set()
+            {
+                isSet = true;
+                return Task.Run(() => tcs.TrySetResult(this));
+            }
+
+            private volatile bool isSet;
+            /// <summary>
+            /// Indicates that this event instance has been set and is eligible for
+            /// replacement by the next Reset().
+            /// </summary>
+            public bool IsSet { get { return isSet; } }
+
+            private readonly AutoResetEvent take = new AutoResetEvent(true);
+
+            readonly TaskCompletionSource<EventInstance> tcs = new TaskCompletionSource<EventInstance>();
+
+            public bool TryTakeEvent()
+            {
+                Debug.Assert(tcs.Task.IsCompleted);
+                return take.WaitOne(TimeSpan.Zero);
+            }
+
+            public Task<EventInstance> Event { get { return tcs.Task; } }
         }
 
         class EventAwaiter
@@ -111,18 +160,23 @@ namespace Streams.Interleaved.Util
             {
                 while (!tcs.Task.IsCompleted)
                 {
-                    await eventSource.GetCompletionTask();
+                    var instance = await eventSource.GetCompletionTask();
                     if (tcs.Task.IsCompleted) return;
                     lock (this)
                     {
                         if (tcs.Task.IsCompleted) return;
-                        if (!eventSource.TryTakeEvent()) continue; // Wait for the next one.
+                        if (!eventSource.TryTakeEvent(instance)) continue; // Wait for the next one.
                         completed = true;
                     }
                     tcs.SetResult(true);
                 }
             }
 
+            /// <summary>
+            /// Try to set the result of this awaiter, if it has not already been set.
+            /// </summary>
+            /// <param name="result"></param>
+            /// <returns></returns>
             protected bool TrySetResult(bool result)
             {
                 lock (this)
@@ -136,6 +190,11 @@ namespace Streams.Interleaved.Util
 
             private readonly TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>();
 
+            /// <summary>
+            /// Task upon which a caller should wait. Completes with 'true' if it took the
+            /// event notification, or false otherwise (eg. timeout). Not necessarily guaranteed
+            /// to complete.
+            /// </summary>
             public Task<bool> Event { get { return tcs.Task; } }
         }
 
