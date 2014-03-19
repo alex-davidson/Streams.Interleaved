@@ -34,6 +34,7 @@ namespace Streams.Interleaved.Util
             if (isSet) return;
 
             var currentEvent = AcquireCurrentEventForSet();
+            RaceCondition.Test(20);
             Task.Run(() => currentEvent.TrySetResult(true));
         }
 
@@ -46,6 +47,7 @@ namespace Streams.Interleaved.Util
             if (isSet) return;
 
             var currentEvent = AcquireCurrentEventForSet();
+            RaceCondition.Test(20);
             currentEvent.TrySetResult(true);
         }
 
