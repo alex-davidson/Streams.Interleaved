@@ -129,9 +129,10 @@ namespace Streams.Interleaved.Internals
         /// <remarks>
         /// The entire allocated chain is committed synchronously. The returned task completes once all blocks
         /// have been flushed to the commit target.
+        /// Exceptions will be thrown asynchronously, ie. on the returned Task.
         /// </remarks>
         /// <returns></returns>
-        public Task CloseAsync()
+        public async Task CloseAsync()
         {
             lifetime.Indicator.AssertNotAborted();
             if (PreventFurtherAllocations())
@@ -152,7 +153,7 @@ namespace Streams.Interleaved.Internals
                     lifetime.Indicator.AssertNotAborted();
                 }
             }
-            return commitQueue.FlushTask;
+            await commitQueue.FlushTask;
         }
 
         /// <summary>
