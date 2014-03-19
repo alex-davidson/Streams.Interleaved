@@ -105,5 +105,16 @@ namespace Streams.Interleaved.UnitTests.Util
             Assert.That(shortAwaiter.Result, Is.False);
             Assert.That(longAwaiter.Result, Is.True);
         }
+
+        [Test]
+        public void NewAwaiterGetsExistingSetNotification()
+        {
+            var autoResetEvent = new AwaitableAutoResetEvent();
+
+            autoResetEvent.Set();
+            var awaiter = autoResetEvent.One(TimeSpan.FromMilliseconds(10));
+
+            Assert.That(awaiter.Result, Is.True);
+        }
     }
 }
