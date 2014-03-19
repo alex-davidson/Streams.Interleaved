@@ -260,11 +260,15 @@ namespace Streams.Interleaved.Internals
             }
         }
 
+        /// <summary>
+        /// Implementation of a non-blocking commit queue with flushes performed on a background thread.
+        /// </summary>
         public class CommitQueue
         {
             private readonly IBlockCommitTarget committer;
             private readonly LivenessIndicator livenessIndicator;
             private readonly Task backgroundWriter;
+            private readonly AwaitableAutoResetEvent workNotification = new AwaitableAutoResetEvent();
 
             public CommitQueue(IBlockCommitTarget committer, LivenessIndicator livenessIndicator)
             {
@@ -310,13 +314,22 @@ namespace Streams.Interleaved.Internals
             {
                 Interlocked.Add(ref commitPayload, block.Size);
                 committableBlocks.Enqueue(block);
+                workNotification.Set();
+            }
+
+            private bool ShouldTerminate()
+            {
+                livenessIndicator.AbortToken.ThrowIfCancellationRequested(); // Abnormal loop termination condition. Entire stream is aborted.
+                return !livenessIndicator.ParentIsLive;
             }
 
             private async Task BackgroundWriter()
             {
                 while (ThereExistUnflushedBlocks()) // Graceful loop termination condition. Continue until everything allocated is flushed.
                 {
-                    if (!livenessIndicator.ParentIsLive) return;
+                    await workNotification.One(TimeSpan.FromMilliseconds(50));
+                    if (ShouldTerminate()) return;
+
                     WritableBlock committable;
                     while (committableBlocks.TryDequeue(out committable))
                     {
@@ -332,12 +345,8 @@ namespace Streams.Interleaved.Internals
                             throw;
                         }
                         Interlocked.Add(ref commitPayload, -committable.Size);
+                        if (ShouldTerminate()) return;
                     }
-                    if (!livenessIndicator.ParentIsLive) return;
-
-                    await Task.Yield();
-
-                    livenessIndicator.AbortToken.ThrowIfCancellationRequested(); // Abnormal loop termination condition. Entire stream is aborted.
                 }
             }
 
@@ -346,6 +355,7 @@ namespace Streams.Interleaved.Internals
                 this.blockCount = blockCount;
                 Interlocked.MemoryBarrier();
                 allBlocksAreCommittable = true;
+                workNotification.Set();
             }
         }
 

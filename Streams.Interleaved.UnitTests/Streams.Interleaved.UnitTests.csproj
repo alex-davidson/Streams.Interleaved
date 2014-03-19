@@ -57,6 +57,7 @@
     <Compile Include="MultiplexedWritableStreamTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Internals\WritableBlockTests.cs" />
+    <Compile Include="Util\AwaitableAutoResetEventTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
