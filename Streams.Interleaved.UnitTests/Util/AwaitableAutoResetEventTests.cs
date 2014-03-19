@@ -79,6 +79,18 @@ namespace Streams.Interleaved.UnitTests.Util
             Assert.That(awaiter.Result, Is.True);
         }
 
+        [Test, Repeat(5)]
+        public void ResetDoesNotMaskPreviousSetForExistingAwaiters()
+        {
+            var autoResetEvent = new AwaitableAutoResetEvent();
+
+            var awaiter = autoResetEvent.One(TimeSpan.FromMilliseconds(50));
+            autoResetEvent.Set();
+            autoResetEvent.Reset();
+
+            Assert.That(awaiter.Result, Is.True);
+        }
+
         [Test]
         public void TimedOutAwaiterDoesNotConsumeTrigger()
         {
