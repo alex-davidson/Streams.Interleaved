@@ -34,6 +34,18 @@ namespace Streams.Interleaved.Util
             if (isSet) return;
 
             var currentEvent = AcquireCurrentEventForSet();
+            Task.Run(() => currentEvent.TrySetResult(true));
+        }
+
+        /// <summary>
+        /// Triggers any live waits on this event. Returns when callbacks have completed.
+        /// </summary>
+        /// <returns></returns>
+        public void SetAndWait()
+        {
+            if (isSet) return;
+
+            var currentEvent = AcquireCurrentEventForSet();
             currentEvent.TrySetResult(true);
         }
 

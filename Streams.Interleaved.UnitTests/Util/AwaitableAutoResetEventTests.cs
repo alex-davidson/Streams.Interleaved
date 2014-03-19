@@ -22,7 +22,7 @@ namespace Streams.Interleaved.UnitTests.Util
 
             Assume.That(awaiters.Select(a => a.IsCompleted), Is.All.False);
 
-            autoResetEvent.Set();
+            autoResetEvent.SetAndWait();
 
             Assert.That(awaiters.Count(a => a.IsCompleted), Is.EqualTo(1));
         }
@@ -40,8 +40,8 @@ namespace Streams.Interleaved.UnitTests.Util
 
             Assume.That(awaiters.Select(a => a.IsCompleted), Is.All.False);
 
-            autoResetEvent.Set();
-            autoResetEvent.Set();
+            autoResetEvent.SetAndWait();
+            autoResetEvent.SetAndWait();
 
             Assert.That(awaiters.Count(a => a.IsCompleted), Is.EqualTo(2));
         }
@@ -62,7 +62,7 @@ namespace Streams.Interleaved.UnitTests.Util
             var autoResetEvent = new AwaitableAutoResetEvent();
 
             var awaiter = autoResetEvent.One();
-            autoResetEvent.Set();
+            autoResetEvent.SetAndWait();
 
             Assert.That(awaiter.Result, Is.True);
         }
@@ -74,7 +74,7 @@ namespace Streams.Interleaved.UnitTests.Util
 
             var awaiter = autoResetEvent.One();
             autoResetEvent.Reset();
-            autoResetEvent.Set();
+            autoResetEvent.SetAndWait();
 
             Assert.That(awaiter.Result, Is.True);
         }
@@ -88,7 +88,7 @@ namespace Streams.Interleaved.UnitTests.Util
             var longAwaiter = autoResetEvent.One();
             shortAwaiter.Wait();
 
-            autoResetEvent.Set();
+            autoResetEvent.SetAndWait();
 
             Assert.That(shortAwaiter.Result, Is.False);
             Assert.That(longAwaiter.Result, Is.True);

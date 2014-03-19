@@ -134,6 +134,18 @@ namespace Streams.Interleaved.UnitTests.Internals
             GC.WaitForPendingFinalizers();
         }
 
+        [Test, Timeout(1000)]
+        public void CommitNotificationDoesNotBlockOnBackgroundWriter()
+        {
+            var target = new BlockingCommitTarget();
+            var indicator = new LivenessIndicatorSource();
+            var commitQueue = new WritableBlockChain.CommitQueue(target, indicator.TakeWeakReference());
+            var block = new WritableBlock(0, 4096);
+            commitQueue.Commit(block);
+
+
+        }
+
         private static void QueueFailingCommitAndDetachInstance(IBlockCommitTarget target)
         {
             var chain = new WritableBlockChain(target);
@@ -181,6 +193,22 @@ namespace Streams.Interleaved.UnitTests.Internals
             public void WaitUntilCalled()
             {
                 called.Wait();
+            }
+        }
+
+        class BlockingCommitTarget : IBlockCommitTarget
+        {
+            private ManualResetEventSlim unblock = new ManualResetEventSlim(false);
+
+            public async Task Flush(WritableBlock block, CancellationToken token)
+            {
+                unblock.Wait(token);
+                await Task.Yield();
+            }
+
+            public void Unblock()
+            {
+                unblock.Set();
             }
         }
     }
