@@ -327,7 +327,7 @@ namespace Streams.Interleaved.Internals
             {
                 while (ThereExistUnflushedBlocks()) // Graceful loop termination condition. Continue until everything allocated is flushed.
                 {
-                    await workNotification.One(TimeSpan.FromMilliseconds(50));
+                    await workNotification.One(TimeSpan.FromMilliseconds(50), livenessIndicator.AbortToken);
                     if (ShouldTerminate()) return;
 
                     WritableBlock committable;

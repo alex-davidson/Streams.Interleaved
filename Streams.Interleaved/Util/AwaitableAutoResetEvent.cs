@@ -14,7 +14,7 @@ namespace Streams.Interleaved.Util
     /// <remarks>
     /// Each time the event is set, only one awaiter will be triggered. The event then resets.
     /// </remarks>
-    public class AwaitableAutoResetEvent
+    public sealed class AwaitableAutoResetEvent
     {
         public AwaitableAutoResetEvent(bool initiallySet = false)
         {
@@ -112,7 +112,7 @@ namespace Streams.Interleaved.Util
             return result;
         }
 
-        class EventInstance
+        sealed class EventInstance
         {
             /// <summary>
             /// Sets the event synchronously and returns the associated completion callback task.
@@ -144,27 +144,28 @@ namespace Streams.Interleaved.Util
             public Task<EventInstance> Event { get { return tcs.Task; } }
         }
 
-        class EventAwaiter
+        sealed class EventAwaiter
         {
             private readonly AwaitableAutoResetEvent eventSource;
             private bool completed;
 
-            public EventAwaiter(AwaitableAutoResetEvent eventSource)
+            public EventAwaiter(AwaitableAutoResetEvent eventSource, CancellationToken cancelToken)
             {
                 this.eventSource = eventSource;
                 tcs.Task.ContinueWith(t => GC.KeepAlive(this));
+                cancelToken.Register(Cancel);
                 WaitForTrigger();
             }
 
             private async void WaitForTrigger()
             {
-                while (!tcs.Task.IsCompleted)
+                while (!completed)
                 {
                     var instance = await eventSource.GetCompletionTask();
-                    if (tcs.Task.IsCompleted) return;
+                    if (completed) return;
                     lock (this)
                     {
-                        if (tcs.Task.IsCompleted) return;
+                        if (completed) return;
                         if (!eventSource.TryTakeEvent(instance)) continue; // Wait for the next one.
                         completed = true;
                     }
@@ -177,50 +178,71 @@ namespace Streams.Interleaved.Util
             /// </summary>
             /// <param name="result"></param>
             /// <returns></returns>
-            protected bool TrySetResult(bool result)
+            private void Cancel()
             {
                 lock (this)
                 {
-                    if (completed) return false;
+                    if (completed) return;
                     completed = true;
                 }
-                tcs.SetResult(result);
-                return true;
+                tcs.TrySetCanceled();
             }
 
             private readonly TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>();
 
             /// <summary>
-            /// Task upon which a caller should wait. Completes with 'true' if it took the
-            /// event notification, or false otherwise (eg. timeout). Not necessarily guaranteed
+            /// Task upon which a caller should wait. Completes if it took the event
+            /// notification, or cancels otherwise (eg. timeout). Not necessarily guaranteed
             /// to complete.
             /// </summary>
             public Task<bool> Event { get { return tcs.Task; } }
         }
 
-        class TimeLimitedEventAwaiter : EventAwaiter
+        /// <summary>
+        /// Returns a task which completes with true if it takes the event notification, or
+        /// false if the time limit expires, or cancels if the specified token is cancelled.
+        /// </summary>
+        /// <param name="limit"></param>
+        /// <param name="cancelToken"></param>
+        /// <returns></returns>
+        public Task<bool> One(TimeSpan limit, CancellationToken cancelToken)
         {
-            public TimeLimitedEventAwaiter(TimeSpan waitDuration, AwaitableAutoResetEvent eventSource)
-                : base(eventSource)
-            {
-                WaitForTimeout(waitDuration);
-            }
-
-            private async void WaitForTimeout(TimeSpan waitDuration)
-            {
-                await Task.Delay(waitDuration);
-                TrySetResult(false);
-            }
+            var timeout = new CancellationTokenSource();
+            timeout.CancelAfter(limit);
+            cancelToken.Register(timeout.Cancel);
+            return One(timeout.Token).ContinueWith(t => !t.IsCanceled, cancelToken);
         }
 
+        /// <summary>
+        /// Returns a task which completes with true if it takes the event notification, or
+        /// false if the time limit expires.
+        /// </summary>
+        /// <param name="limit"></param>
+        /// <returns></returns>
         public Task<bool> One(TimeSpan limit)
         {
-            return new TimeLimitedEventAwaiter(limit, this).Event;
+            var timeout = new CancellationTokenSource();
+            timeout.CancelAfter(limit);
+            return One(timeout.Token).ContinueWith(t => !t.IsCanceled);
+        }
+        /// <summary>
+        /// Returns a cancellable task which completes with true if it takes the event
+        /// notification, or cancels if the specified token is cancelled.
+        /// </summary>
+        /// <param name="cancelToken"></param>
+        /// <returns></returns>
+        public Task<bool> One(CancellationToken cancelToken)
+        {
+            return new EventAwaiter(this, cancelToken).Event;
         }
 
+        /// <summary>
+        /// Returns a task which completes with true when it takes the event notification.
+        /// </summary>
+        /// <returns></returns>
         public Task<bool> One()
         {
-            return new EventAwaiter(this).Event;
+            return One(CancellationToken.None);
         }
     }
 }
