@@ -21,9 +21,6 @@ namespace Streams.Interleaved.Util
             if (initiallySet) Set();
         }
 
-        private readonly object @lock = new object();
-        private EventInstance current = new EventInstance();
-        
         /// <summary>
         /// Sets the event, causing the first available wait to continue.
         /// </summary>
@@ -55,6 +52,58 @@ namespace Streams.Interleaved.Util
             ResetInternal(current);
         }
 
+        /// <summary>
+        /// Returns a task which completes with true if it takes the event notification, or
+        /// false if the time limit expires, or cancels if the specified token is cancelled.
+        /// </summary>
+        /// <param name="limit"></param>
+        /// <param name="cancelToken"></param>
+        /// <returns></returns>
+        public Task<bool> One(TimeSpan limit, CancellationToken cancelToken)
+        {
+            var timeout = new CancellationTokenSource();
+            timeout.CancelAfter(limit);
+            cancelToken.Register(timeout.Cancel);
+            return One(timeout.Token).ContinueWith(t => !t.IsCanceled, cancelToken);
+        }
+
+        /// <summary>
+        /// Returns a task which completes with true if it takes the event notification, or
+        /// false if the time limit expires.
+        /// </summary>
+        /// <param name="limit"></param>
+        /// <returns></returns>
+        public Task<bool> One(TimeSpan limit)
+        {
+            var timeout = new CancellationTokenSource();
+            timeout.CancelAfter(limit);
+            return One(timeout.Token).ContinueWith(t => !t.IsCanceled);
+        }
+        /// <summary>
+        /// Returns a cancellable task which completes with true if it takes the event
+        /// notification, or cancels if the specified token is cancelled.
+        /// </summary>
+        /// <param name="cancelToken"></param>
+        /// <returns></returns>
+        public Task<bool> One(CancellationToken cancelToken)
+        {
+            return new EventAwaiter(this, cancelToken).Event;
+        }
+
+        /// <summary>
+        /// Returns a task which completes with true when it takes the event notification.
+        /// </summary>
+        /// <returns></returns>
+        public Task<bool> One()
+        {
+            return One(CancellationToken.None);
+        }
+
+
+
+        private readonly object @lock = new object();
+        private EventInstance current = new EventInstance();
+        
         /// <summary>
         /// Replace the current event instance with a new, unset one if it has been set AND
         /// if the specified instance is the current one.
@@ -198,51 +247,5 @@ namespace Streams.Interleaved.Util
             public Task<bool> Event { get { return tcs.Task; } }
         }
 
-        /// <summary>
-        /// Returns a task which completes with true if it takes the event notification, or
-        /// false if the time limit expires, or cancels if the specified token is cancelled.
-        /// </summary>
-        /// <param name="limit"></param>
-        /// <param name="cancelToken"></param>
-        /// <returns></returns>
-        public Task<bool> One(TimeSpan limit, CancellationToken cancelToken)
-        {
-            var timeout = new CancellationTokenSource();
-            timeout.CancelAfter(limit);
-            cancelToken.Register(timeout.Cancel);
-            return One(timeout.Token).ContinueWith(t => !t.IsCanceled, cancelToken);
-        }
-
-        /// <summary>
-        /// Returns a task which completes with true if it takes the event notification, or
-        /// false if the time limit expires.
-        /// </summary>
-        /// <param name="limit"></param>
-        /// <returns></returns>
-        public Task<bool> One(TimeSpan limit)
-        {
-            var timeout = new CancellationTokenSource();
-            timeout.CancelAfter(limit);
-            return One(timeout.Token).ContinueWith(t => !t.IsCanceled);
-        }
-        /// <summary>
-        /// Returns a cancellable task which completes with true if it takes the event
-        /// notification, or cancels if the specified token is cancelled.
-        /// </summary>
-        /// <param name="cancelToken"></param>
-        /// <returns></returns>
-        public Task<bool> One(CancellationToken cancelToken)
-        {
-            return new EventAwaiter(this, cancelToken).Event;
-        }
-
-        /// <summary>
-        /// Returns a task which completes with true when it takes the event notification.
-        /// </summary>
-        /// <returns></returns>
-        public Task<bool> One()
-        {
-            return One(CancellationToken.None);
-        }
     }
 }
