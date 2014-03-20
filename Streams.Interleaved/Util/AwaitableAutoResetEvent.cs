@@ -1,8 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -101,7 +98,6 @@ namespace Streams.Interleaved.Util
 
 
 
-        private readonly object @lock = new object();
         private EventInstance current = new EventInstance();
         
         /// <summary>
@@ -112,14 +108,9 @@ namespace Streams.Interleaved.Util
         private void ResetInternal(EventInstance instance)
         {
             if (!instance.IsSet) return;
-            lock (@lock)
-            {
-                if (instance == current)
-                {
-                    if (!current.IsSet) return;
-                    current = new EventInstance();
-                }
-            }
+            if (current != instance) return;
+            var newInstance =  new EventInstance();
+            Interlocked.CompareExchange(ref current, newInstance, instance); 
         }
 
         /// <summary>
@@ -128,10 +119,7 @@ namespace Streams.Interleaved.Util
         /// <returns></returns>
         private Task SetCurrentEventInstance()
         {
-            lock (@lock)
-            {
-                return current.Set();
-            }
+            return current.Set();
         }
 
         /// <summary>
@@ -140,10 +128,7 @@ namespace Streams.Interleaved.Util
         /// <returns></returns>
         private Task<EventInstance> GetCompletionTask()
         {
-            lock (@lock)
-            {
-                return current.Event;
-            }
+            return current.Event;
         }
 
         /// <summary>

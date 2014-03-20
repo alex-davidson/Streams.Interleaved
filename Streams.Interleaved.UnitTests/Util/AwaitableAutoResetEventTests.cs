@@ -171,5 +171,26 @@ namespace Streams.Interleaved.UnitTests.Util
             Assert.Throws<TaskCanceledException>(async () => await awaiter);
             Assert.That(awaiter.IsCanceled, Is.True);
         }
+
+        [Test]
+        public void StressTest()
+        {
+            const int initialEventCount = 500;
+
+            var autoResetEvent = new AwaitableAutoResetEvent();
+
+            var waiters = Enumerable.Range(0, initialEventCount).Select(i => autoResetEvent.One()).ToArray();
+
+            var sentEvents = 0;
+            while (!Task.WhenAll(waiters).Wait(TimeSpan.Zero))
+            {
+                autoResetEvent.SetAndWait();
+                sentEvents++;
+            }
+
+            Assert.AreEqual(initialEventCount, sentEvents);
+            Assert.False(autoResetEvent.One(TimeSpan.Zero).Result);
+
+        }
     }
 }
